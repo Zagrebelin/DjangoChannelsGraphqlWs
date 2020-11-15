@@ -846,7 +846,12 @@ class GraphqlWsConsumer(ch_websocket.AsyncJsonWebsocketConsumer):
                 operation_id,
                 "".join(traceback.format_exception(type(ex), ex, tb)).strip(),
             )
-
+        
+        # resolve Promises in response values, if any
+        for key, value in data.items():
+            if isinstance(value, Promise):
+                data[key] = value.value
+                
         await self.send_json(
             {
                 "type": "data",

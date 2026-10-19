@@ -1,4 +1,4 @@
-# Copyright (C) DATADVANCE, 2010-2020
+# Copyright (C) DATADVANCE, 2010-2023
 #
 # Permission is hereby granted, free of charge, to any person obtaining
 # a copy of this software and associated documentation files (the
@@ -31,15 +31,13 @@ import channels_graphql_ws
 
 
 @pytest.mark.asyncio
-async def test_publish_skip(gql):
+@pytest.mark.parametrize("subprotocol", ["graphql-transport-ws", "graphql-ws"])
+async def test_publish_skip(gql, subprotocol):
     """Test it is possible to skip the broadcast from the `publish`.
 
     Here we send the message to the fake chat server and make sure that
     the sender does not receive the notification about the message while
     another client receives it.
-
-    Technically we test that returning `SKIP` from the `publish` method
-    suppresses the notification.
     """
 
     print("Prepare the test setup: GraphQL backend classes.")
@@ -56,7 +54,7 @@ async def test_publish_skip(gql):
             len(headers) == 1 and headers[0][0] == b"cookie"
         ), f"Unexpected headers received: {headers}"
         cookie_header = headers[0][1].decode()
-        cookie = http.cookies.SimpleCookie(cookie_header)
+        cookie: http.cookies.SimpleCookie = http.cookies.SimpleCookie(cookie_header)
         sessionid = cookie["sessionid"].value
         return sessionid
 
@@ -76,7 +74,9 @@ async def test_publish_skip(gql):
             del root
             OnNewMessage.broadcast(
                 payload={
-                    "author_sessionid": sessionid_from_headers(info.context.headers),
+                    "author_sessionid": sessionid_from_headers(
+                        info.context.channels_scope["headers"]
+                    ),
                     "message": message,
                 }
             )
@@ -90,9 +90,9 @@ async def test_publish_skip(gql):
         @staticmethod
         def publish(payload, info):
             """Notify all clients except the author of the message."""
-            sessionid = sessionid_from_headers(info.context.headers)
+            sessionid = sessionid_from_headers(info.context.channels_scope["headers"])
             if payload["author_sessionid"] == sessionid:
-                return OnNewMessage.SKIP
+                return None
 
             return OnNewMessage(message=payload["message"])
 
@@ -115,6 +115,7 @@ async def test_publish_skip(gql):
         communicator_kwds={
             "headers": [(b"cookie", b"sessionid=%s" % uuid.uuid4().hex.encode())]
         },
+        subprotocol=subprotocol,
     )
     await comm1.connect_and_init()
 
@@ -125,47 +126,36 @@ async def test_publish_skip(gql):
         communicator_kwds={
             "headers": [(b"cookie", b"sessionid=%s" % uuid.uuid4().hex.encode())]
         },
+        subprotocol=subprotocol,
     )
     await comm2.connect_and_init()
 
     print("Subscribe to receive a new message notifications.")
 
-    await comm1.send(
-        msg_type="start",
-        payload={
-            "query": "subscription op_name { on_new_message { message } }",
-            "variables": {},
-            "operationName": "op_name",
-        },
+    await comm1.start(
+        query="subscription op_name { on_new_message { message } }",
+        operation_name="op_name",
     )
     await comm1.assert_no_messages("Subscribe responded with a message!")
 
-    sub_op_id = await comm2.send(
-        msg_type="start",
-        payload={
-            "query": "subscription op_name { on_new_message { message } }",
-            "variables": {},
-            "operationName": "op_name",
-        },
+    sub_op_id = await comm2.start(
+        query="subscription op_name { on_new_message { message } }",
+        operation_name="op_name",
     )
     await comm2.assert_no_messages("Subscribe responded with a message!")
 
     print("Send a new message to check we have not received notification about it.")
 
-    mut_op_id = await comm1.send(
-        msg_type="start",
-        payload={
-            "query": """mutation op_name { send_message(message: "Hi!") { is_ok } }""",
-            "variables": {},
-            "operationName": "op_name",
-        },
+    mut_op_id = await comm1.start(
+        query="""mutation op_name { send_message(message: "Hi!") { is_ok } }""",
+        operation_name="op_name",
     )
-    await comm1.receive(assert_id=mut_op_id, assert_type="data")
-    await comm1.receive(assert_id=mut_op_id, assert_type="complete")
+    await comm1.receive_next(mut_op_id)
+    await comm1.receive_complete(mut_op_id)
 
     await comm1.assert_no_messages("Self-notification happened!")
 
-    resp = await comm2.receive(assert_id=sub_op_id, assert_type="data")
+    resp = await comm2.receive_next(sub_op_id)
     assert resp["data"]["on_new_message"]["message"] == "Hi!"
 
     await comm1.assert_no_messages(

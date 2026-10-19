@@ -1,4 +1,4 @@
-# Copyright (C) DATADVANCE, 2010-2020
+# Copyright (C) DATADVANCE, 2010-2023
 #
 # Permission is hereby granted, free of charge, to any person obtaining
 # a copy of this software and associated documentation files (the
@@ -28,9 +28,8 @@
 import asyncio
 import pathlib
 import sys
-from typing import List
 import uuid
-
+from typing import List
 
 # NOTE: On Windows with Python 3.8 enable selector back (default seems
 # to be changed in Python 3.8), otherwise we get `NotImplementedError`
@@ -84,6 +83,7 @@ TEMPLATES = [
     }
 ]
 INSTALLED_APPS: List[str] = [
+    "daphne",
     "django.contrib.contenttypes",
     "django.contrib.sessions",
     "django.contrib.auth",
@@ -91,8 +91,9 @@ INSTALLED_APPS: List[str] = [
     "django.contrib.staticfiles",
     "django.contrib.admin",
     "channels",
+    "graphene_django",
 ]
-ALLOWED_HOSTS = "*"
+ALLOWED_HOSTS = ["*"]
 STATIC_URL = "/static/"
 STATICFILES_FINDERS = ["django.contrib.staticfiles.finders.AppDirectoriesFinder"]
 # In this simple example we use in-process in-memory Channel layer.

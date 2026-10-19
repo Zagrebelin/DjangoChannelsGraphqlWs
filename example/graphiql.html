@@ -1,6 +1,5 @@
-<!DOCTYPE html>
 <!--
-# Copyright (C) DATADVANCE, 2010-2020
+# Copyright (C) DATADVANCE, 2010-2023
 #
 # Permission is hereby granted, free of charge, to any person obtaining
 # a copy of this software and associated documentation files (the
@@ -21,43 +20,54 @@
 # TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 # SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 -->
-<html>
+<!DOCTYPE html>
+<html lang="en">
 
 <head>
+    <title>GraphiQL</title>
     <style>
-        html,
         body {
             height: 100%;
             margin: 0;
-            overflow: hidden;
             width: 100%;
+            overflow: hidden;
         }
+
+        #graphiql {
+            height: 100vh;
+        }
+
     </style>
-    <link href="//cdn.jsdelivr.net/npm/graphiql@0.11.11/graphiql.css" rel="stylesheet" />
-    <script src="//cdn.jsdelivr.net/react/15.4.2/react.min.js"></script>
-    <script src="//cdn.jsdelivr.net/react/15.4.2/react-dom.min.js"></script>
-    <script src="//cdn.jsdelivr.net/npm/graphiql@0.11.11/graphiql.min.js"></script>
-    <script src="//cdn.jsdelivr.net/npm/graphql-transport-ws@0.8.3/browser/client.js"></script>
+
+    <script src="https://unpkg.com/react@17/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@17/umd/react-dom.development.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/graphiql/graphiql.min.css" />
 </head>
 
 <body>
+    <div id="graphiql">Loading...</div>
+    <script src="https://unpkg.com/graphiql/graphiql.min.js" type="application/javascript"></script>
     <script>
-        // Setup subscription client.
+        const GRAPHQL_WS_ENDPOINT =
+            (location.protocol === "https" ? "wss" : "ws") +
+            "://" +
+            location.host +
+            "/graphql-ws/";
         const GRAPHQL_ENDPOINT =
-            (location.protocol === 'https' ? 'wss' : 'ws')
-            + '://' + location.host + '/graphql/';
-        let subClient = new window.SubscriptionsTransportWs.SubscriptionClient(
-            GRAPHQL_ENDPOINT,
-            { reconnect: true }
-        );
-        subFetcher = subClient.request.bind(subClient)
+            location.protocol +
+            "//" +
+            location.host +
+            "/graphql/";
 
-        // Render <GraphiQL /> into the body.
         ReactDOM.render(
             React.createElement(GraphiQL, {
-                fetcher: subFetcher, //graphQLFetcher
+                fetcher: GraphiQL.createFetcher({
+                    url: GRAPHQL_ENDPOINT,
+                    subscriptionUrl: GRAPHQL_WS_ENDPOINT,
+                }),
+                defaultEditorToolsVisibility: true,
             }),
-            document.body
+            document.getElementById('graphiql'),
         );
     </script>
 </body>

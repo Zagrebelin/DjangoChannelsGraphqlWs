@@ -1,4 +1,4 @@
-# Copyright (C) DATADVANCE, 2010-2020
+# Copyright (C) DATADVANCE, 2010-2023
 #
 # Permission is hereby granted, free of charge, to any person obtaining
 # a copy of this software and associated documentation files (the
@@ -27,7 +27,6 @@ import logging
 import django.core.serializers
 import django.db
 import msgpack
-
 
 # Module logger.
 LOG = logging.getLogger(__name__)

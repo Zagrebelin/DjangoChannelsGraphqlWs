@@ -1,4 +1,4 @@
-# Copyright (C) DATADVANCE, 2010-2020
+# Copyright (C) DATADVANCE, 2010-2023
 #
 # Permission is hereby granted, free of charge, to any person obtaining
 # a copy of this software and associated documentation files (the
@@ -58,6 +58,27 @@ def event_loop(request):
     loop.close()
 
 
+class DummyQuery(graphene.ObjectType):
+    """Dummy query to use if no query supplied to the `gql` call.
+
+    Graphene will throw a exception from the `graphene.Schema` constructor
+    call if the `query` parameter is `None`. The `query` with no fields
+    will also result in an exception.
+
+    Our `gql` function should allow `None` value for the `query`
+    parameter to make tests code simplier. So this "DummyQuery" will be
+    used as a substitution for the `query` parameter of the
+    `graphene.Schema` constructor call.
+    """
+
+    value = graphene.String()
+
+    def resolve_value(self):
+        """Resolver to return predefined value which can be tested."""
+        del self
+        return "test"
+
+
 @pytest.fixture
 def gql(db, request):
     """PyTest fixture for testing GraphQL WebSocket backends.
@@ -75,7 +96,8 @@ def gql(db, request):
             mutation=None,
             subscription=None,
             consumer_attrs=None,
-            communicator_kwds=None
+            communicator_kwds=None,
+            subprotocol="graphql-transport-ws",
         ):
 
     Args:
@@ -85,6 +107,9 @@ def gql(db, request):
         consumer_attrs: `GraphqlWsConsumer` attributes dict. Optional.
         communicator_kwds: Extra keyword arguments for the Channels
             `channels.testing.WebsocketCommunicator`. Optional.
+        subprotocol: WebSocket subprotocol to use by the Client. Can
+            have a value of "graphql-transport-ws" or "graphql-ws".
+            By default set to "graphql-transport-ws".
 
     Returns:
         An instance of the `GraphqlWsClient` class which has many
@@ -102,7 +127,9 @@ def gql(db, request):
             # `GraphqlWsConsumer` settings.
             consumer_attrs={"strict_ordering": True},
             # `channels.testing.WebsocketCommunicator` settings.
-            communicator_kwds={"headers": [...]}
+            communicator_kwds={"headers": [...]},
+            # Subprotocol to test.
+            subprotocol="graphql-ws"
         )
         ...
     ```
@@ -122,11 +149,24 @@ def gql(db, request):
         subscription=None,
         consumer_attrs=None,
         communicator_kwds=None,
+        subprotocol="graphql-transport-ws",
     ):
         """Setup GraphQL consumer and the communicator for tests."""
+        # Graphene will throw a exception from the `graphene.Schema`
+        # constructor call if the `query` parameter is `None`. The
+        # `query` with no fields will also result in exception.
+        #
+        # If no `query` provided to the `client_constructor`, then use
+        # DummyQuery, since Graphene requires one.
+        if query is None:
+            query = DummyQuery
 
         class ChannelsConsumer(channels_graphql_ws.GraphqlWsConsumer):
             """Channels WebSocket consumer for GraphQL API."""
+
+            # Redefine the group prefix to be able to detect that it is
+            # really changed.
+            group_name_prefix = "TEST"
 
             schema = graphene.Schema(
                 query=query,
@@ -143,7 +183,7 @@ def gql(db, request):
         application = channels.routing.ProtocolTypeRouter(
             {
                 "websocket": channels.routing.URLRouter(
-                    [django.urls.path("graphql/", ChannelsConsumer)]
+                    [django.urls.path("graphql/", ChannelsConsumer.as_asgi())]
                 )
             }
         )
@@ -152,9 +192,12 @@ def gql(db, request):
             application=application,
             path="graphql/",
             communicator_kwds=communicator_kwds,
+            subprotocol=subprotocol,
         )
 
-        client = channels_graphql_ws.testing.GraphqlWsClient(transport)
+        client = channels_graphql_ws.testing.GraphqlWsClient(
+            transport, subprotocol=subprotocol
+        )
         issued_clients.append(client)
         return client
 
@@ -171,6 +214,9 @@ def gql(db, request):
 def synchronize_inmemory_channel_layer():
     """Monkeypatch `InMemoryChannelLayer` to make it thread safe.
 
+    The `InMemoryChannelLayer` is not thread safe by default since it use the
+    `asyncio.Queue`.
+
     Without this we have a blinking fails in the unit tests run:
     Traceback (most recent call last):
         File ".../site-packages/promise/promise.py", line 842, in handle_future_result
@@ -183,7 +229,7 @@ def synchronize_inmemory_channel_layer():
             "payload": serialized_payload,
         File ".../site-packages/channels/layers.py", line 351, in group_send
             for channel in self.groups.get(group, set()):
-     graphql.error.located_error.GraphQLLocatedError:
+     graphql.error.GraphQLError:
          dictionary changed size during iteration
     """
     guard = threading.RLock()

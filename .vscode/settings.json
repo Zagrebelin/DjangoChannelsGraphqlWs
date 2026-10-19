@@ -1,4 +1,4 @@
-// Copyright (C) DATADVANCE, 2010-2020
+// Copyright (C) DATADVANCE, 2010-2023
 //
 // Permission is hereby granted, free of charge, to any person obtaining
 // a copy of this software and associated documentation files (the
@@ -24,19 +24,22 @@
 
 {
     "cSpell.enabled": true,
-    "cSpell.version": "0.1",
     "cSpell.allowCompoundWords": true,
     "cSpell.words": [
         "addfinalizer",
+        "aget",
         "aiohttp",
         "asdict",
         "asgi",
         "asgiref",
         "asyncio",
+        "blazingly",
         "choco",
         "dedent",
         "deserialization",
+        "edouardtheron",
         "envlist",
+        "GQLWS",
         "graphiql",
         "graphql",
         "inmemory",
@@ -57,19 +60,24 @@
         "prokhorov",
         "pydocstyle",
         "pyenchant",
+        "pyenv",
         "pylint",
         "pylintrc",
         "pyproject",
         "pytest",
+        "pyutils",
+        "rabbitmq",
         "rcfile",
         "repos",
         "sessionid",
         "skipif",
         "testenv",
+        "Tomáš",
         "unpackb",
         "unsubscriptable",
         "unsubscription",
         "venv",
+        "virtualenv",
         "wakeup",
         "xdist",
         "xenial",
@@ -79,15 +87,17 @@
     "editor.rulers": [72, 88],
     "editor.tabSize": 4,
     "git.ignoreLimitWarning": true,
+    "isort.args": ["--virtual-env", "${workspaceFolder}/.venv"],
     "python.linting.banditEnabled": false,
     "python.linting.mypyEnabled": true,
     "python.linting.pydocstyleEnabled": true,
     "python.linting.pylintEnabled": true,
     "python.linting.pylintUseMinimalCheckers": false,
-    "python.sortImports.args": ["--virtual-env", "${workspaceFolder}/.venv"],
     "python.testing.autoTestDiscoverOnSaveEnabled": true,
     "python.testing.nosetestsEnabled": false,
     "python.testing.pytestArgs": ["-n8"],
     "python.testing.pytestEnabled": true,
-    "python.testing.unittestEnabled": false
+    "python.testing.unittestEnabled": false,
+    "python.pythonPath": ".venv/bin/python3",
+    "files.insertFinalNewline": true
 }

@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# Copyright (C) DATADVANCE, 2010-2020
+# Copyright (C) DATADVANCE, 2010-2023
 #
 # Permission is hereby granted, free of charge, to any person obtaining
 # a copy of this software and associated documentation files (the
@@ -27,7 +27,6 @@ import os
 import pathlib
 import sys
 
-
 # Append directory where `channels_graphqlws` package resides.
 sys.path.append(str(pathlib.Path(__file__).resolve().parent.parent))
 
@@ -41,11 +40,11 @@ if __name__ == "__main__":
         # other exceptions on Python 2.
         try:
             import django  # pylint: disable=unused-import
-        except ImportError:
+        except ImportError as ex:
             raise ImportError(
                 "Could not import Django. Are you sure it is installed and "
                 "available on your PYTHONPATH environment variable? Did you "
                 "forget to activate a virtual environment?"
-            )
+            ) from ex
         raise
     execute_from_command_line(sys.argv)

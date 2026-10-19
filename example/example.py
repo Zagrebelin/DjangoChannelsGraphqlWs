@@ -1,4 +1,4 @@
-# Copyright (C) DATADVANCE, 2010-2020
+# Copyright (C) DATADVANCE, 2010-2023
 #
 # Permission is hereby granted, free of charge, to any person obtaining
 # a copy of this software and associated documentation files (the
@@ -21,28 +21,31 @@
 
 """Simple example of the DjangoChannelsGraphqlWs."""
 
-from collections import defaultdict
 import pathlib
-from typing import DefaultDict, List
+from collections import defaultdict
+from typing import Any, DefaultDict, Dict, List
 
-import asgiref
 import channels
 import channels.auth
+import channels.db
+import channels.routing
 import django
 import django.contrib.admin
 import django.contrib.auth
+import django.core.asgi
+import django.urls
 import graphene
-import graphene_django.types
+import graphene_django.views
+import graphql
 
 import channels_graphql_ws
 
-
 # It is OK, Graphene works this way.
-# pylint: disable=no-self-use,unsubscriptable-object,invalid-name
+# pylint: disable=unsubscriptable-object,invalid-name
 
 # Fake storage for the chat history. Do not do this in production, it
 # lives only in memory of the running server and does not persist.
-chats: DefaultDict[str, List[str]] = defaultdict(list)
+chats: DefaultDict[str, List[Dict[str, Any]]] = defaultdict(list)
 
 
 # ---------------------------------------------------------------------- TYPES & QUERIES
@@ -58,70 +61,18 @@ class Message(  # type: ignore
     sender = graphene.String()
 
 
-class User(graphene_django.types.DjangoObjectType):
-    """User model to show how to use 'info.context.user'."""
-
-    class Meta:
-        """Wrap Django user model."""
-
-        model = django.contrib.auth.get_user_model()
-
-
 class Query(graphene.ObjectType):
     """Root GraphQL query."""
 
     history = graphene.List(Message, chatroom=graphene.String())
-    user = graphene.Field(User)
 
     def resolve_history(self, info, chatroom):
         """Return chat history."""
         del info
         return chats[chatroom] if chatroom in chats else []
 
-    def resolve_user(self, info):
-        """Provide currently logged in user."""
-        if info.context.user.is_authenticated:
-            return info.context.user
-        return None
-
 
 # ---------------------------------------------------------------------------- MUTATIONS
-
-
-class Login(graphene.Mutation, name="LoginPayload"):  # type: ignore
-    """Login mutation.
-
-    Login implementation, following the Channels guide:
-    https://channels.readthedocs.io/en/latest/topics/authentication.html
-    """
-
-    ok = graphene.Boolean(required=True)
-
-    class Arguments:
-        """Login request arguments."""
-
-        username = graphene.String(required=True)
-        password = graphene.String(required=True)
-
-    def mutate(self, info, username, password):
-        """Login request."""
-
-        # Ask Django to authenticate user.
-        user = django.contrib.auth.authenticate(username=username, password=password)
-        if user is None:
-            return Login(ok=False)
-
-        # Use Channels to login, in other words to put proper data to
-        # the session stored in the scope. The `info.context` is
-        # practically just a wrapper around Channel `self.scope`, but
-        # the `login` method requires dict, so use `_asdict`.
-        asgiref.sync.async_to_sync(channels.auth.login)(info.context._asdict(), user)
-        # Save the session, `channels.auth.login` does not do this.
-        info.context.session.save()
-
-        return Login(ok=True)
-
-
 class SendChatMessage(graphene.Mutation, name="SendChatMessagePayload"):  # type: ignore
     """Send chat message."""
 
@@ -136,18 +87,18 @@ class SendChatMessage(graphene.Mutation, name="SendChatMessagePayload"):  # type
     def mutate(self, info, chatroom, text):
         """Mutation "resolver" - store and broadcast a message."""
 
-        # Use the username from the connection scope if authorized.
-        username = (
-            info.context.user.username
-            if info.context.user.is_authenticated
-            else "Anonymous"
-        )
+        # Here we identify the sender by `sessionid` cookie.
+        user_session_key = info.context.session.session_key
 
         # Store a message.
-        chats[chatroom].append({"chatroom": chatroom, "text": text, "sender": username})
+        chats[chatroom].append(
+            {"chatroom": chatroom, "text": text, "sender": user_session_key}
+        )
 
         # Notify subscribers.
-        OnNewChatMessage.new_chat_message(chatroom=chatroom, text=text, sender=username)
+        OnNewChatMessage.new_chat_message(
+            chatroom=chatroom, text=text, sender=user_session_key
+        )
 
         return SendChatMessage(ok=True)
 
@@ -156,7 +107,6 @@ class Mutation(graphene.ObjectType):
     """Root GraphQL mutation."""
 
     send_chat_message = SendChatMessage.Field()
-    login = Login.Field()
 
 
 # ------------------------------------------------------------------------ SUBSCRIPTIONS
@@ -195,11 +145,10 @@ class OnNewChatMessage(channels_graphql_ws.Subscription):
         assert chatroom is None or chatroom == new_msg_chatroom
 
         # Avoid self-notifications.
-        if (
-            info.context.user.is_authenticated
-            and new_msg_sender == info.context.user.username
-        ):
-            return OnNewChatMessage.SKIP
+        # The sender is identified by a `sessionid` cookie.
+        user_session_key = info.context.channels_scope["session"].session_key
+        if user_session_key == new_msg_sender:
+            return None
 
         return OnNewChatMessage(
             chatroom=chatroom, text=new_msg_text, sender=new_msg_sender
@@ -229,42 +178,27 @@ class Subscription(graphene.ObjectType):
 # ----------------------------------------------------------- GRAPHQL WEBSOCKET CONSUMER
 
 
-def demo_middleware(next_middleware, root, info, *args, **kwds):
+async def demo_middleware(next_middleware, root, info, *args, **kwds):
     """Demo GraphQL middleware.
 
     For more information read:
     https://docs.graphene-python.org/en/latest/execution/middleware/#middleware
     """
-    # Skip Graphiql introspection requests, there are a lot.
-    if (
-        info.operation.name is not None
-        and info.operation.name.value != "IntrospectionQuery"
-    ):
-        print("Demo middleware report")
-        print("    operation :", info.operation.operation)
-        print("    name      :", info.operation.name.value)
+    print("Demo middleware report")
+    print("    operation :", info.operation.operation)
+    print("    name      :", info.operation.name.value)
 
     # Invoke next middleware.
-    return next_middleware(root, info, *args, **kwds)
+    result = next_middleware(root, info, *args, **kwds)
+    if graphql.pyutils.is_awaitable(result):
+        result = await result
+    return result
 
 
 class MyGraphqlWsConsumer(channels_graphql_ws.GraphqlWsConsumer):
     """Channels WebSocket consumer which provides GraphQL API."""
 
-    async def on_connect(self, payload):
-        """Handle WebSocket connection event."""
-
-        # Use auxiliary Channels function `get_user` to replace an
-        # instance of `channels.auth.UserLazyObject` with a native
-        # Django user object (user model instance or `AnonymousUser`)
-        # It is not necessary, but it helps to keep resolver code
-        # simpler. Cause in both HTTP/WebSocket requests they can use
-        # `info.context.user`, but not a wrapper. For example objects of
-        # type Graphene Django type `DjangoObjectType` does not accept
-        # `channels.auth.UserLazyObject` instances.
-        # https://github.com/datadvance/DjangoChannelsGraphqlWs/issues/23
-        self.scope["user"] = await channels.auth.get_user(self.scope)
-
+    send_ping_every = 1
     schema = graphene.Schema(query=Query, mutation=Mutation, subscription=Subscription)
     middleware = [demo_middleware]
 
@@ -276,24 +210,44 @@ class MyGraphqlWsConsumer(channels_graphql_ws.GraphqlWsConsumer):
 # https://channels.readthedocs.io/en/latest/topics/authentication.html
 application = channels.routing.ProtocolTypeRouter(
     {
+        "http": django.core.asgi.get_asgi_application(),
         "websocket": channels.auth.AuthMiddlewareStack(
             channels.routing.URLRouter(
-                [django.urls.path("graphql/", MyGraphqlWsConsumer)]
+                [django.urls.path("graphql-ws/", MyGraphqlWsConsumer.as_asgi())]
             )
-        )
+        ),
     }
 )
+
 
 # -------------------------------------------------------------------- URL CONFIGURATION
 def graphiql(request):
     """Trivial view to serve the `graphiql.html` file."""
+    # It is important to create a session if it hasn't already been
+    # created, because `sessionid` cookie is used to identify the
+    # sender.
+    if not request.session.session_key:
+        request.session.create()
     del request
     graphiql_filepath = pathlib.Path(__file__).absolute().parent / "graphiql.html"
-    with open(graphiql_filepath) as f:
+    # It is better to specify an encoding when opening documents.
+    # Using the system default implicitly can create problems on other
+    # operating systems.
+    with open(graphiql_filepath, encoding="utf-8") as f:
         return django.http.response.HttpResponse(f.read())
 
 
 urlpatterns = [
     django.urls.path("", graphiql),
+    # `GraphQLView` used to handle mutations and queries requests
+    # sended by http.
+    django.urls.path(
+        "graphql/",
+        graphene_django.views.GraphQLView.as_view(
+            schema=graphene.Schema(
+                query=Query, mutation=Mutation, subscription=Subscription
+            )
+        ),
+    ),
     django.urls.path("admin", django.contrib.admin.site.urls),
 ]
